@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Bulletstorm: Anarchy</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #111; font-family: sans-serif; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%); pointer-events: none; }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #00f0ff; box-shadow: 0 0 6px #00f0ff; }
+        #crosshair::before { top: 7px; left: 0; width: 16px; height: 2px; }
+        #crosshair::after { top: 0; left: 7px; width: 2px; height: 16px; }
+        #hud { position: absolute; bottom: 20px; left: 20px; color: #fff; font-size: 20px; pointer-events: none; }
+        .box { background: rgba(10, 15, 30, 0.85); border: 2px solid #00f0ff; border-radius: 8px; padding: 12px 20px; }
+        #score-board { position: absolute; top: 20px; right: 20px; color: #fff; font-size: 24px; background: rgba(10, 15, 30, 0.85); border: 2px solid #ff00ff; border-radius: 8px; padding: 10px 20px; pointer-events: none; }
+        #instructions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(5, 10, 25, 0.95); border: 3px solid #00f0ff; border-radius: 12px; padding: 30px; color: #fff; text-align: center; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <div id="hud">
+        <div class="box">
+            <div id="w-name" style="font-size: 24px; color: #00f0ff; font-weight: bold;">RIFLE</div>
+            <div id="ammo" style="font-size: 32px; font-weight: bold;">75 / 75</div>
+            <div style="font-size: 13px; color: #aaa; margin-top: 5px;">[1] Puška (75) &nbsp; [2] Pištolj (18) &nbsp; [3] Nož (10s CD) &nbsp; [R] Reload</div>
+        </div>
+    </div>
+    <div id="score-board">🎉 Konfeti: <span id="score">0</span></div>
+    <div id="instructions">
+        <h1 style="color: #00f0ff;">BULLETSTORM: ANARCHY</h1>
+        <p>🎮 <strong>W, A, S, D</strong> za hodanje | <strong>Space</strong> za skok</p>
+        <p>🔫 <strong>1</strong> Puška | <strong>2</strong> Pištolj | <strong>3</strong> Nož | <strong>Levi Klik</strong> za pucanje</p>
+        <h2 style="color: #ffaa00; margin-top: 20px;">👉 KLIKNI OVDE DA IGRAŠ! 👈</h2>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function sfxLaser(p) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = p ? 'square' : 'sawtooth';
+            o.frequency.setValueAtTime(p ? 600 : 900, audioCtx.currentTime);
+            o.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.15);
+            g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + 0.15);
+        }
+        function sfxPop() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.frequency.setValueAtTime(400, audioCtx.currentTime);
+            o.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.1);
+            g.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + 0.1);
+        }
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0e1a);
+        scene.fog = new THREE.FogExp2(0x0a0e1a, 0.025);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dl = new THREE.DirectionalLight(0x00f0ff, 0.8); dl.position.set(20, 40, 20); scene.add(dl);
+
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x151b28 }));
+        floor.rotation.x = -Math.PI / 2; scene.add(floor);
+        scene.add(new THREE.GridHelper(100, 50, 0x00f0ff, 0x334466));
+
+        let currentWeapon = 'rifle', ammo = { rifle: 75, pistol: 18 }, maxAmmo = { rifle: 75, pistol: 18 };
+        let knifeCD = 0, score = 0;
+        const weaponHolder = new THREE.Group(); camera.add(weaponHolder); scene.add(camera); camera.position.set(0, 1.7, 0);
+
+        const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.7), new THREE.MeshStandardMaterial({ color: 0x111, metalness: 0.8 }));
+        rifle.position.set(0.3, -0.3, -0.6); weaponHolder.add(rifle);
+
+        const bots = [];
+        function addBot(x, z) {
+            const b = new THREE.Group();
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), new THREE.MeshStandardMaterial({ color: 0xffdd00 }));
+            head.position.y = 1.4;
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 1.2, 16), new THREE.MeshStandardMaterial({ color: 0x3388ff }));
+            body.position.y = 0.6;
+            b.add(head, body); b.position.set(x, 0, z); scene.add(b); bots.push(b);
+        }
+        for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; addBot(Math.cos(a) * 16, Math.sin(a) * 16); }
+
+        const confetti = [];
+        function popConfetti(pos) {
+            sfxPop();
+            for(let i = 0; i < 80; i++) {
+                const p = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff, side: THREE.DoubleSide }));
+                p.position.copy(pos); p.position.y += 0.8;
+                p.userData.v = new THREE.Vector3((Math.random()-0.5)*12, Math.random()*10 + 4, (Math.random()-0.5)*12);
+                p.userData.life = 1.0; scene.add(p); confetti.push(p);
+            }
+        }
+
+        const bullets = [];
+        function shoot() {
+            if (currentWeapon !== 'knife' && ammo[currentWeapon] <= 0) return;
+            if (currentWeapon === 'knife') {
+                if (knifeCD > 0) return;
+                knifeCD = 10.0;
+                for (let i = bots.length - 1; i >= 0; i--) {
+                    if (camera.position.distanceTo(bots[i].position) < 4.0) {
+                        popConfetti(bots[i].position); scene.remove(bots[i]); bots.splice(i, 1);
+                        score++; document.getElementById('score').innerText = score;
+                        setTimeout(() => addBot((Math.random()-0.5)*30, (Math.random()-0.5)*30), 2000);
+                        break;
+                    }
+                }
+                return;
+            }
+            ammo[currentWeapon]--;
+            document.getElementById('ammo').innerText = `${ammo[currentWeapon]} / ${maxAmmo[currentWeapon]}`;
+            sfxLaser(currentWeapon === 'pistol');
+            const b = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+            b.position.copy(camera.position);
+            const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+            b.userData.dir = dir; b.userData.life = 2.0;
+            scene.add(b); bullets.push(b);
+        }
+
+        let isLocked = false, moveFwd = false, moveBwd = false, moveLeft = false, moveRight = false, yaw = 0, pitch = 0, velY = 0;
+        document.getElementById('instructions').onclick = () => document.body.requestPointerLock();
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = (document.pointerLockElement === document.body);
+            document.getElementById('instructions').style.display = isLocked ? 'none' : 'block';
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!isLocked) return;
+            yaw -= e.movementX * 0.0022; pitch -= e.movementY * 0.0022;
+            pitch = Math.max(-1.4, Math.min(1.4, pitch));
+            camera.rotation.set(0, 0, 0); camera.rotation.y = yaw; camera.rotation.x = pitch;
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyW') moveFwd = true; if (e.code === 'KeyS') moveBwd = true;
+            if (e.code === 'KeyA') moveLeft = true; if (e.code === 'KeyD') moveRight = true;
+            if (e.code === 'Digit1') { currentWeapon = 'rifle'; document.getElementById('w-name').innerText = 'RIFLE'; document.getElementById('ammo').innerText = `${ammo.rifle} / ${maxAmmo.rifle}`; }
+            if (e.code === 'Digit2') { currentWeapon = 'pistol'; document.getElementById('w-name').innerText = 'PISTOL'; document.getElementById('ammo').innerText = `${ammo.pistol} / ${maxAmmo.pistol}`; }
+            if (e.code === 'Digit3') { currentWeapon = 'knife'; document.getElementById('w-name').innerText = 'KNIFE'; document.getElementById('ammo').innerText = 'BESKONAČNO 🗡️'; }
+            if (e.code === 'KeyR' && currentWeapon !== 'knife') { ammo[currentWeapon] = maxAmmo[currentWeapon]; document.getElementById('ammo').innerText = `${ammo[currentWeapon]} / ${maxAmmo[currentWeapon]}`; }
+            if (e.code === 'Space' && camera.position.y <= 1.71) velY = 8.0;
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyW') moveFwd = false; if (e.code === 'KeyS') moveBwd = false;
+            if (e.code === 'KeyA') moveLeft = false; if (e.code === 'KeyD') moveRight = false;
+        });
+        document.addEventListener('mousedown', (e) => { if (isLocked && e.button === 0) shoot(); });
+
+        let lastT = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+            const now = performance.now(), dt = Math.min((now - lastT)/1000, 0.1); lastT = now;
+            if (isLocked) {
+                const fwd = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                const rgt = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                if (moveFwd) camera.position.add(fwd.multiplyScalar(12 * dt));
+                if (moveBwd) camera.position.add(fwd.multiplyScalar(-12 * dt));
+                if (moveLeft) camera.position.add(rgt.multiplyScalar(-12 * dt));
+                if (moveRight) camera.position.add(rgt.multiplyScalar(12 * dt));
+                velY -= 22 * dt; camera.position.y += velY * dt;
+                if (camera.position.y <= 1.7) { camera.position.y = 1.7; velY = 0; }
+                if (knifeCD > 0) knifeCD -= dt;
+            }
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.position.add(b.userData.dir.clone().multiplyScalar(45 * dt));
+                b.userData.life -= dt;
+                for (let j = bots.length - 1; j >= 0; j--) {
+                    if (b.position.distanceTo(bots[j].position.clone().add(new THREE.Vector3(0,1,0))) < 1.2) {
+                        popConfetti(bots[j].position); scene.remove(bots[j]); bots.splice(j, 1);
+                        score++; document.getElementById('score').innerText = score;
+                        setTimeout(() => addBot((Math.random()-0.5)*30, (Math.random()-0.5)*30), 2000);
+                        b.userData.life = 0; break;
+                    }
+                }
+                if (b.userData.life <= 0) { scene.remove(b); bullets.splice(i, 1); }
+            }
+            for (let i = confetti.length - 1; i >= 0; i--) {
+                const p = confetti[i];
+                p.userData.v.y -= 12 * dt; p.position.add(p.userData.v.clone().multiplyScalar(dt));
+                p.userData.life -= dt * 0.4;
+                if (p.userData.life <= 0) { scene.remove(p); confetti.splice(i, 1); }
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
